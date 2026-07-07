@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: social-network-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpassword
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7.0-alpine
+    container_name: social-network-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: social-network-auth-service
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
+      - MONGO_DB_NAME=social_network
+      - REDIS_URI=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=super_secret_access_token_key_123456
+      - JWT_REFRESH_SECRET=super_secret_refresh_token_key_654321
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - social-network-net
+
+networks:
+  social-network-net:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
