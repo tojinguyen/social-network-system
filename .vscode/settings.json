@@ -1,7 +1,5 @@
 {
   "gopls": {
-    "build.buildFlags": [
-      "-tags=wireinject"
-    ]
+    "build.buildFlags": []
   }
 }
