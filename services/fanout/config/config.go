@@ -13,6 +13,7 @@ type Config struct {
 	KafkaBrokers       string `mapstructure:"KAFKA_BROKERS"`
 	PostCreatedTopic   string `mapstructure:"KAFKA_TOPIC_POST_CREATED"`
 	CelebrityThreshold int    `mapstructure:"CELEBRITY_THRESHOLD"`
+	WorkerPoolSize     int    `mapstructure:"WORKER_POOL_SIZE"`
 }
 
 // Load loads the configurations using Viper.
@@ -23,6 +24,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.CelebrityThreshold == 0 {
 		cfg.CelebrityThreshold = 10000
+	}
+	if cfg.WorkerPoolSize == 0 {
+		cfg.WorkerPoolSize = 10
 	}
 	return &cfg, nil
 }
