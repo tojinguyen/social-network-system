@@ -12,6 +12,8 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: adminpassword
     volumes:
       - mongo_data:/data/db
+    networks:
+      - social-network-net
 
   redis:
     image: redis:7.0-alpine
@@ -21,6 +23,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - social-network-net
 
   auth-service:
     build:
@@ -41,6 +45,45 @@ services:
     depends_on:
       - mongodb
       - redis
+    networks:
+      - social-network-net
+
+  post-service:
+    build:
+      context: .
+      dockerfile: services/post/Dockerfile
+    container_name: social-network-post-service
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
+      - MONGO_DB_NAME=social_network
+      - REDIS_URI=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=super_secret_access_token_key_123456
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - social-network-net
+
+  feed-service:
+    build:
+      context: .
+      dockerfile: services/feed/Dockerfile
+    container_name: social-network-feed-service
+    restart: always
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
+      - MONGO_DB_NAME=social_network
+      - JWT_SECRET=super_secret_access_token_key_123456
+    depends_on:
+      - mongodb
     networks:
       - social-network-net
 
