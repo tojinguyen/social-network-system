@@ -3,8 +3,10 @@ package usecase
 import (
 	"context"
 	"errors"
+	"log"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"social-network-system/pkg/kafka"
 	"social-network-system/services/post/internal/domain"
 )
 
@@ -24,12 +26,14 @@ type PostUseCase interface {
 
 type postUseCase struct {
 	postRepo domain.PostRepository
+	producer kafka.Producer
 }
 
 // NewPostUseCase creates a new PostUseCase instance.
-func NewPostUseCase(postRepo domain.PostRepository) PostUseCase {
+func NewPostUseCase(postRepo domain.PostRepository, producer kafka.Producer) PostUseCase {
 	return &postUseCase{
 		postRepo: postRepo,
+		producer: producer,
 	}
 }
 
@@ -48,6 +52,19 @@ func (u *postUseCase) CreatePost(ctx context.Context, userID string, req *domain
 	if err := u.postRepo.Create(ctx, post); err != nil {
 		return nil, err
 	}
+
+	// Publish PostCreated event to Kafka asynchronously to prevent blocking the request
+	go func() {
+		event := domain.PostCreatedEvent{
+			PostID:    post.ID.Hex(),
+			AuthorID:  post.AuthorID.Hex(),
+			CreatedAt: post.CreatedAt,
+		}
+		// Use a background context for asynchronous event publishing
+		if err := u.producer.Publish(context.Background(), event.PostID, event); err != nil {
+			log.Printf("Failed to publish PostCreated event for post %s: %v", event.PostID, err)
+		}
+	}()
 
 	return post, nil
 }

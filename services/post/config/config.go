@@ -12,6 +12,8 @@ type Config struct {
 	RedisURI      string `mapstructure:"REDIS_URI"`
 	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
 	JWTSecret     string `mapstructure:"JWT_SECRET"`
+	KafkaBrokers  string `mapstructure:"KAFKA_BROKERS"`
+	PostCreatedTopic string `mapstructure:"KAFKA_TOPIC_POST_CREATED"`
 }
 
 // Load loads the configurations using Viper.

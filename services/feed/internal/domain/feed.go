@@ -23,11 +23,25 @@ type FeedResponse struct {
 	NextCursor string      `json:"next_cursor,omitempty"`
 }
 
+// FollowConnection represents a user that is followed, along with their follower count.
+type FollowConnection struct {
+	TargetID      primitive.ObjectID
+	FollowerCount int
+}
+
+// FeedCacheRepository defines the contract for reading/writing the feed cache.
+type FeedCacheRepository interface {
+	GetFeedCache(ctx context.Context, userID string, cursor time.Time, limit int) ([]string, error)
+}
+
 // FeedRepository defines the database contract for feed data retrieval.
 type FeedRepository interface {
-	// GetFollowingIDs returns the list of user IDs that the given user is following.
-	GetFollowingIDs(ctx context.Context, userID string) ([]primitive.ObjectID, error)
+	// GetFollowingConnections returns the list of followed target IDs along with their follower counts.
+	GetFollowingConnections(ctx context.Context, userID string) ([]FollowConnection, error)
 	// GetPostsByAuthorIDs returns posts from the given authors, sorted by created_at desc,
 	// with cursor-based pagination.
 	GetPostsByAuthorIDs(ctx context.Context, authorIDs []primitive.ObjectID, cursor time.Time, limit int) ([]*Post, error)
+	// GetPostsByIDs retrieves posts matching the given post IDs.
+	GetPostsByIDs(ctx context.Context, ids []string) ([]*Post, error)
 }
+

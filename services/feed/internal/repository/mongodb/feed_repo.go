@@ -11,49 +11,67 @@ import (
 	"social-network-system/services/feed/internal/domain"
 )
 
-// userFollow is an internal struct to deserialize follow documents.
-type userFollow struct {
-	FollowerID primitive.ObjectID `bson:"follower_id"`
-	TargetID   primitive.ObjectID `bson:"target_id"`
+// followConnBSON represents follow relationship aggregation schema in BSON.
+type followConnBSON struct {
+	TargetID      primitive.ObjectID `bson:"target_id"`
+	FollowerCount int                `bson:"follower_count"`
 }
 
 type feedRepo struct {
-	db              *mongo.Database
-	postsCollection *mongo.Collection
+	db               *mongo.Database
+	postsCollection  *mongo.Collection
 	followCollection *mongo.Collection
 }
 
 // NewFeedRepository creates a new FeedRepository instance.
 func NewFeedRepository(db *mongo.Database) domain.FeedRepository {
 	return &feedRepo{
-		db:              db,
-		postsCollection: db.Collection("posts"),
+		db:               db,
+		postsCollection:  db.Collection("posts"),
 		followCollection: db.Collection("user_follows"),
 	}
 }
 
-func (r *feedRepo) GetFollowingIDs(ctx context.Context, userID string) ([]primitive.ObjectID, error) {
+func (r *feedRepo) GetFollowingConnections(ctx context.Context, userID string) ([]domain.FollowConnection, error) {
 	objID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	cur, err := r.followCollection.Find(ctx, bson.M{"follower_id": objID})
+	// Match followed users of the current user, lookup to aggregate their follower counts
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{{Key: "follower_id", Value: objID}}}},
+		{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "user_follows"},
+			{Key: "localField", Value: "target_id"},
+			{Key: "foreignField", Value: "target_id"},
+			{Key: "as", Value: "followers"},
+		}}},
+		{{Key: "$project", Value: bson.D{
+			{Key: "target_id", Value: 1},
+			{Key: "follower_count", Value: bson.D{{Key: "$size", Value: "$followers"}}},
+		}}},
+	}
+
+	cur, err := r.followCollection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
 	}
 	defer cur.Close(ctx)
 
-	var follows []userFollow
-	if err := cur.All(ctx, &follows); err != nil {
+	var conns []followConnBSON
+	if err := cur.All(ctx, &conns); err != nil {
 		return nil, err
 	}
 
-	ids := make([]primitive.ObjectID, len(follows))
-	for i, f := range follows {
-		ids[i] = f.TargetID
+	result := make([]domain.FollowConnection, len(conns))
+	for i, c := range conns {
+		result[i] = domain.FollowConnection{
+			TargetID:      c.TargetID,
+			FollowerCount: c.FollowerCount,
+		}
 	}
-	return ids, nil
+	return result, nil
 }
 
 func (r *feedRepo) GetPostsByAuthorIDs(ctx context.Context, authorIDs []primitive.ObjectID, cursor time.Time, limit int) ([]*domain.Post, error) {
@@ -87,3 +105,36 @@ func (r *feedRepo) GetPostsByAuthorIDs(ctx context.Context, authorIDs []primitiv
 
 	return posts, nil
 }
+
+func (r *feedRepo) GetPostsByIDs(ctx context.Context, ids []string) ([]*domain.Post, error) {
+	if len(ids) == 0 {
+		return []*domain.Post{}, nil
+	}
+
+	objIDs := make([]primitive.ObjectID, len(ids))
+	for i, id := range ids {
+		objID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			return nil, err
+		}
+		objIDs[i] = objID
+	}
+
+	filter := bson.M{
+		"_id": bson.M{"$in": objIDs},
+	}
+
+	cur, err := r.postsCollection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var posts []*domain.Post
+	if err := cur.All(ctx, &posts); err != nil {
+		return nil, err
+	}
+
+	return posts, nil
+}
+

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 
 	"social-network-system/pkg/jwtutil"
@@ -22,6 +23,7 @@ type App struct {
 	Config       *config.Config
 	Engine       *gin.Engine
 	MongoClient  *mongo.Client
+	RedisClient  *redis.Client
 	FeedHandler  *delivery.FeedHandler
 	TokenManager jwtutil.TokenManager
 }

@@ -12,6 +12,7 @@ import (
 
 	"social-network-system/pkg/database"
 	"social-network-system/pkg/jwtutil"
+	"social-network-system/pkg/kafka"
 	"social-network-system/services/post/config"
 	delivery "social-network-system/services/post/internal/delivery/http"
 	mongorepo "social-network-system/services/post/internal/repository/mongodb"
@@ -40,6 +41,14 @@ func provideEngine() *gin.Engine {
 	return gin.Default()
 }
 
+func provideKafkaProducer(cfg *config.Config) (kafka.Producer, func()) {
+	producer := kafka.NewProducer(cfg.KafkaBrokers, cfg.PostCreatedTopic)
+	cleanup := func() {
+		_ = producer.Close()
+	}
+	return producer, cleanup
+}
+
 // InitializeApp initializes all dependencies and constructs the App.
 func InitializeApp(cfg *config.Config) (*App, func(), error) {
 	wire.Build(
@@ -47,6 +56,7 @@ func InitializeApp(cfg *config.Config) (*App, func(), error) {
 		provideMongoDatabase,
 		provideTokenManager,
 		provideEngine,
+		provideKafkaProducer,
 
 		mongorepo.NewPostRepository,
 		mongorepo.NewFollowRepository,

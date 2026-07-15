@@ -9,12 +9,14 @@ package main
 import (
 	"context"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 	"social-network-system/pkg/database"
 	"social-network-system/pkg/jwtutil"
 	"social-network-system/services/feed/config"
 	"social-network-system/services/feed/internal/delivery/http"
 	"social-network-system/services/feed/internal/repository/mongodb"
+	redisrepo "social-network-system/services/feed/internal/repository/redis"
 	"social-network-system/services/feed/internal/usecase"
 )
 
@@ -27,19 +29,27 @@ func InitializeApp(cfg *config.Config) (*App, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	redisClient, cleanup2, err := provideRedisClient(cfg)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	mongoDatabase := provideMongoDatabase(client, cfg)
 	feedRepository := mongodb.NewFeedRepository(mongoDatabase)
+	feedCacheRepository := redisrepo.NewFeedCacheRepository(redisClient)
 	tokenManager := provideTokenManager(cfg)
-	feedUseCase := usecase.NewFeedUseCase(feedRepository)
+	feedUseCase := usecase.NewFeedUseCase(cfg, feedRepository, feedCacheRepository)
 	feedHandler := http.NewFeedHandler(feedUseCase)
 	app := &App{
 		Config:       cfg,
 		Engine:       engine,
 		MongoClient:  client,
+		RedisClient:  redisClient,
 		FeedHandler:  feedHandler,
 		TokenManager: tokenManager,
 	}
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }
@@ -58,6 +68,16 @@ func provideMongoClient(cfg *config.Config) (*mongo.Client, func(), error) {
 
 func provideMongoDatabase(client *mongo.Client, cfg *config.Config) *mongo.Database {
 	return client.Database(cfg.MongoDBName)
+}
+
+func provideRedisClient(cfg *config.Config) (*redis.Client, func(), error) {
+	client, err := database.ConnectRedis(context.Background(), cfg.RedisURI, cfg.RedisPassword)
+	cleanup := func() {
+		if client != nil {
+			_ = client.Close()
+		}
+	}
+	return client, cleanup, err
 }
 
 func provideTokenManager(cfg *config.Config) jwtutil.TokenManager {

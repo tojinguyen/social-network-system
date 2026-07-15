@@ -4,14 +4,14 @@ import (
 	"social-network-system/pkg/config"
 )
 
-// Config holds all configurations for the Feed Service.
+// Config holds all configurations for the Fan-out Worker.
 type Config struct {
-	Port        string `mapstructure:"PORT"`
-	MongoURI    string `mapstructure:"MONGO_URI"`
-	MongoDBName string `mapstructure:"MONGO_DB_NAME"`
-	JWTSecret          string `mapstructure:"JWT_SECRET"`
+	MongoURI           string `mapstructure:"MONGO_URI"`
+	MongoDBName        string `mapstructure:"MONGO_DB_NAME"`
 	RedisURI           string `mapstructure:"REDIS_URI"`
 	RedisPassword      string `mapstructure:"REDIS_PASSWORD"`
+	KafkaBrokers       string `mapstructure:"KAFKA_BROKERS"`
+	PostCreatedTopic   string `mapstructure:"KAFKA_TOPIC_POST_CREATED"`
 	CelebrityThreshold int    `mapstructure:"CELEBRITY_THRESHOLD"`
 }
 

@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"social-network-system/pkg/database"
 	"social-network-system/pkg/jwtutil"
+	"social-network-system/pkg/kafka"
 	"social-network-system/services/post/config"
 	"social-network-system/services/post/internal/delivery/http"
 	"social-network-system/services/post/internal/repository/mongodb"
@@ -27,11 +28,12 @@ func InitializeApp(cfg *config.Config) (*App, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	producer, cleanup2 := provideKafkaProducer(cfg)
 	mongoDatabase := provideMongoDatabase(client, cfg)
 	postRepository := mongodb.NewPostRepository(mongoDatabase)
 	followRepository := mongodb.NewFollowRepository(mongoDatabase)
 	tokenManager := provideTokenManager(cfg)
-	postUseCase := usecase.NewPostUseCase(postRepository)
+	postUseCase := usecase.NewPostUseCase(postRepository, producer)
 	followUseCase := usecase.NewFollowUseCase(followRepository)
 	postHandler := http.NewPostHandler(postUseCase)
 	followHandler := http.NewFollowHandler(followUseCase)
@@ -44,6 +46,7 @@ func InitializeApp(cfg *config.Config) (*App, func(), error) {
 		TokenManager:  tokenManager,
 	}
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }
@@ -70,4 +73,12 @@ func provideTokenManager(cfg *config.Config) jwtutil.TokenManager {
 
 func provideEngine() *gin.Engine {
 	return gin.Default()
+}
+
+func provideKafkaProducer(cfg *config.Config) (kafka.Producer, func()) {
+	producer := kafka.NewProducer(cfg.KafkaBrokers, cfg.PostCreatedTopic)
+	cleanup := func() {
+		_ = producer.Close()
+	}
+	return producer, cleanup
 }
