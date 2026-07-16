@@ -1,0 +1,35 @@
+package config
+
+import (
+	"social-network-system/pkg/config"
+)
+
+// Config holds all configurations for the Chat Engine.
+type Config struct {
+	MongoURI               string `mapstructure:"MONGO_URI"`
+	MongoDBName            string `mapstructure:"MONGO_DB_NAME"`
+	RedisURI               string `mapstructure:"REDIS_URI"`
+	RedisPassword          string `mapstructure:"REDIS_PASSWORD"`
+	KafkaBrokers           string `mapstructure:"KAFKA_BROKERS"`
+	KafkaTopicChatIncoming string `mapstructure:"KAFKA_TOPIC_CHAT_INCOMING"`
+	ConsumerGroupID        string `mapstructure:"CONSUMER_GROUP_ID"`
+	WorkerPoolSize         int    `mapstructure:"WORKER_POOL_SIZE"`
+}
+
+// Load loads the configurations using Viper.
+func Load(path string) (*Config, error) {
+	var cfg Config
+	if err := config.LoadConfig(path, ".env", &cfg); err != nil {
+		return nil, err
+	}
+	if cfg.KafkaTopicChatIncoming == "" {
+		cfg.KafkaTopicChatIncoming = "chat-incoming"
+	}
+	if cfg.ConsumerGroupID == "" {
+		cfg.ConsumerGroupID = "chat-engine-group"
+	}
+	if cfg.WorkerPoolSize <= 0 {
+		cfg.WorkerPoolSize = 50
+	}
+	return &cfg, nil
+}

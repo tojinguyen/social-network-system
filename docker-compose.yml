@@ -114,6 +114,52 @@ services:
     networks:
       - social-network-net
 
+  chat-service:
+    build:
+      context: .
+      dockerfile: services/chat/Dockerfile
+    container_name: social-network-chat-service
+    restart: always
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+      - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
+      - MONGO_DB_NAME=social_network
+      - REDIS_URI=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=super_secret_access_token_key_123456
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - social-network-net
+
+  chatengine-worker:
+    build:
+      context: .
+      dockerfile: services/chatengine/Dockerfile
+    container_name: social-network-chatengine-worker
+    restart: always
+    environment:
+      - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
+      - MONGO_DB_NAME=social_network
+      - REDIS_URI=redis:6379
+      - REDIS_PASSWORD=
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
+      - CONSUMER_GROUP_ID=chat-engine-group
+      - WORKER_POOL_SIZE=50
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - social-network-net
+
   kafka:
     image: bitnami/kafka:3.6
     container_name: social-network-kafka
