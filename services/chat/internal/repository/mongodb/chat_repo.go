@@ -64,7 +64,7 @@ func (r *chatRepo) GetHistory(ctx context.Context, conversationID string, cursor
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer func() { _ = cur.Close(ctx) }()
 
 	var messages []*domain.Message
 	if err := cur.All(ctx, &messages); err != nil {

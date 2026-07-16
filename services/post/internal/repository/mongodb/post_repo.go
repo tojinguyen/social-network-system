@@ -5,11 +5,12 @@ import (
 	"errors"
 	"time"
 
+	"social-network-system/services/post/internal/domain"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"social-network-system/services/post/internal/domain"
 )
 
 type postRepo struct {
@@ -102,7 +103,7 @@ func (r *postRepo) FindByAuthorIDs(ctx context.Context, authorIDs []primitive.Ob
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer func() { _ = cur.Close(ctx) }()
 
 	var posts []*domain.Post
 	if err := cur.All(ctx, &posts); err != nil {

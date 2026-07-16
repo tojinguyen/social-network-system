@@ -29,13 +29,16 @@ func (r *feedCacheRepo) GetFeedCache(ctx context.Context, userID string, cursor 
 		max = strconv.FormatInt(cursor.UnixNano()-1, 10)
 	}
 
-	opt := redis.ZRangeBy{
-		Min:    "-inf",
-		Max:    max,
-		Offset: 0,
-		Count:  int64(limit),
+	args := redis.ZRangeArgs{
+		Key:     key,
+		Start:   max,
+		Stop:    "-inf",
+		ByScore: true,
+		Rev:     true,
+		Offset:  0,
+		Count:   int64(limit),
 	}
 
 	// Fetch members sorted from high to low score (newest to oldest)
-	return r.client.ZRevRangeByScore(ctx, key, &opt).Result()
+	return r.client.ZRangeArgs(ctx, args).Result()
 }

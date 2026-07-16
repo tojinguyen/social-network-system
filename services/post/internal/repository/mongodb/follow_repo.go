@@ -4,11 +4,12 @@ import (
 	"context"
 	"time"
 
+	"social-network-system/services/post/internal/domain"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"social-network-system/services/post/internal/domain"
 )
 
 type followRepo struct {
@@ -101,7 +102,10 @@ func (r *followRepo) GetFollowing(ctx context.Context, userID string) ([]primiti
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+
+	defer func() {
+		_ = cur.Close(ctx)
+	}()
 
 	var follows []domain.UserFollow
 	if err := cur.All(ctx, &follows); err != nil {
@@ -125,7 +129,7 @@ func (r *followRepo) GetFollowers(ctx context.Context, userID string) ([]primiti
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer func() { _ = cur.Close(ctx) }()
 
 	var follows []domain.UserFollow
 	if err := cur.All(ctx, &follows); err != nil {
