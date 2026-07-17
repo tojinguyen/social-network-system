@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"social-network-system/pkg/jwtutil"
+	"social-network-system/pkg/metrics"
 	"social-network-system/pkg/tracing"
 	"social-network-system/services/chat/config"
 	deliveryhttp "social-network-system/services/chat/internal/delivery/http"
@@ -48,6 +49,17 @@ func main() {
 		defer tpShutdown()
 	}
 
+	// Initialize metrics
+	var metricsExporter http.Handler
+	if os.Getenv("OTEL_METRICS_ENABLED") == "true" {
+		exporter, shutdownMetrics, err := metrics.InitMetrics(context.Background(), "chat-service")
+		if err != nil {
+			log.Fatalf("Failed to initialize metrics: %v", err)
+		}
+		defer shutdownMetrics()
+		metricsExporter = exporter
+	}
+
 	// Initialize dependencies using Google Wire
 	app, cleanup, err := InitializeApp(cfg)
 	if err != nil {
@@ -58,6 +70,9 @@ func main() {
 	// Configure routing
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		app.Engine.Use(otelgin.Middleware("chat-service"))
+	}
+	if os.Getenv("OTEL_METRICS_ENABLED") == "true" && metricsExporter != nil {
+		app.Engine.GET("/metrics", gin.WrapH(metricsExporter))
 	}
 	deliveryhttp.SetupRouter(app.Engine, app.ChatHandler, app.WSHandler, app.TokenManager)
 

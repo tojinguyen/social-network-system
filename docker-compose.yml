@@ -44,6 +44,7 @@ services:
       - JWT_REFRESH_SECRET=super_secret_refresh_token_key_654321
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -70,6 +71,7 @@ services:
       - KAFKA_TOPIC_POST_CREATED=post-created
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -96,6 +98,7 @@ services:
       - CELEBRITY_THRESHOLD=10000
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -109,6 +112,8 @@ services:
       dockerfile: services/fanout/Dockerfile
     container_name: social-network-fanout-worker
     restart: always
+    ports:
+      - "8085:8085"
     environment:
       - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
       - MONGO_DB_NAME=social_network
@@ -119,6 +124,7 @@ services:
       - CELEBRITY_THRESHOLD=10000
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -146,6 +152,7 @@ services:
       - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -160,6 +167,8 @@ services:
       dockerfile: services/chatengine/Dockerfile
     container_name: social-network-chatengine-worker
     restart: always
+    ports:
+      - "8086:8086"
     environment:
       - MONGO_URI=mongodb://admin:adminpassword@mongodb:27017/social_network?authSource=admin
       - MONGO_DB_NAME=social_network
@@ -171,6 +180,7 @@ services:
       - WORKER_POOL_SIZE=50
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
@@ -205,6 +215,30 @@ services:
       - "16686:16686"
       - "4317:4317"
       - "4318:4318"
+    networks:
+      - social-network-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: social-network-prometheus
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - social-network-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: social-network-grafana
+    restart: always
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
     networks:
       - social-network-net
 

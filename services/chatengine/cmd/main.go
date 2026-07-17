@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"social-network-system/pkg/metrics"
 	"social-network-system/services/chatengine/config"
 )
 
@@ -28,6 +30,26 @@ func main() {
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize metrics
+	if os.Getenv("OTEL_METRICS_ENABLED") == "true" {
+		metricsExporter, shutdownMetrics, err := metrics.InitMetrics(ctx, "chatengine-worker")
+		if err == nil && metricsExporter != nil {
+			defer shutdownMetrics()
+			go func() {
+				metricsPort := os.Getenv("METRICS_PORT")
+				if metricsPort == "" {
+					metricsPort = "8086"
+				}
+				log.Printf("Serving metrics on :%s/metrics", metricsPort)
+				mux := http.NewServeMux()
+				mux.Handle("/metrics", metricsExporter)
+				if err := http.ListenAndServe(":" + metricsPort, mux); err != nil {
+					log.Printf("Metrics HTTP server failed: %v", err)
+				}
+			}()
+		}
+	}
 
 	// Start worker loop in goroutine
 	go worker.Start(ctx)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 
 	"social-network-system/pkg/database"
 	"social-network-system/pkg/kafka"
+	"social-network-system/pkg/metrics"
 	"social-network-system/services/fanout/config"
 	"social-network-system/services/fanout/internal/worker"
 )
@@ -47,6 +49,26 @@ func main() {
 	defer func() {
 		_ = consumer.Close()
 	}()
+
+	// Initialize metrics
+	if os.Getenv("OTEL_METRICS_ENABLED") == "true" {
+		metricsExporter, shutdownMetrics, err := metrics.InitMetrics(ctx, "fanout-worker")
+		if err == nil && metricsExporter != nil {
+			defer shutdownMetrics()
+			go func() {
+				metricsPort := os.Getenv("METRICS_PORT")
+				if metricsPort == "" {
+					metricsPort = "8085"
+				}
+				log.Printf("Serving metrics on :%s/metrics", metricsPort)
+				mux := http.NewServeMux()
+				mux.Handle("/metrics", metricsExporter)
+				if err := http.ListenAndServe(":" + metricsPort, mux); err != nil {
+					log.Printf("Metrics HTTP server failed: %v", err)
+				}
+			}()
+		}
+	}
 
 	// Start worker
 	fanoutWorker := worker.NewFanoutWorker(cfg, mongoClient, redisClient, consumer)
