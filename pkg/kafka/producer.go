@@ -3,10 +3,12 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"social-network-system/pkg/tracing"
 )
 
 // Producer defines the interface for publishing events to a Kafka topic.
@@ -40,10 +42,16 @@ func (p *kafkaProducer) Publish(ctx context.Context, key string, value interface
 		return err
 	}
 
-	return p.writer.WriteMessages(ctx, kafka.Message{
+	msg := kafka.Message{
 		Key:   []byte(key),
 		Value: payload,
-	})
+	}
+
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		tracing.InjectKafkaHeaders(ctx, &msg.Headers)
+	}
+
+	return p.writer.WriteMessages(ctx, msg)
 }
 
 func (p *kafkaProducer) Close() error {

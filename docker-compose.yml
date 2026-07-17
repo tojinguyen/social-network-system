@@ -42,9 +42,12 @@ services:
       - REDIS_PASSWORD=
       - JWT_SECRET=super_secret_access_token_key_123456
       - JWT_REFRESH_SECRET=super_secret_refresh_token_key_654321
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
+      - jaeger
     networks:
       - social-network-net
 
@@ -65,10 +68,13 @@ services:
       - JWT_SECRET=super_secret_access_token_key_123456
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC_POST_CREATED=post-created
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
       - kafka
+      - jaeger
     networks:
       - social-network-net
 
@@ -87,9 +93,13 @@ services:
       - REDIS_URI=redis:6379
       - REDIS_PASSWORD=
       - JWT_SECRET=super_secret_access_token_key_123456
+      - CELEBRITY_THRESHOLD=10000
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
+      - jaeger
     networks:
       - social-network-net
 
@@ -107,10 +117,13 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC_POST_CREATED=post-created
       - CELEBRITY_THRESHOLD=10000
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
       - kafka
+      - jaeger
     networks:
       - social-network-net
 
@@ -131,10 +144,13 @@ services:
       - JWT_SECRET=super_secret_access_token_key_123456
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
       - kafka
+      - jaeger
     networks:
       - social-network-net
 
@@ -153,10 +169,13 @@ services:
       - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
       - CONSUMER_GROUP_ID=chat-engine-group
       - WORKER_POOL_SIZE=50
+      - OTEL_ENABLED=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
     depends_on:
       - mongodb
       - redis
       - kafka
+      - jaeger
     networks:
       - social-network-net
 
@@ -175,6 +194,17 @@ services:
       - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+    networks:
+      - social-network-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: social-network-jaeger
+    restart: always
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
     networks:
       - social-network-net
 

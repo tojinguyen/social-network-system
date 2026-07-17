@@ -12,8 +12,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"social-network-system/pkg/jwtutil"
+	"social-network-system/pkg/tracing"
 	"social-network-system/services/feed/config"
 	delivery "social-network-system/services/feed/internal/delivery/http"
 )
@@ -35,6 +37,15 @@ func main() {
 		log.Fatalf("Failed to load configurations: %v", err)
 	}
 
+	// Initialize tracing
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		tpShutdown, err := tracing.InitTracer(context.Background(), "feed-service")
+		if err != nil {
+			log.Fatalf("Failed to initialize tracer: %v", err)
+		}
+		defer tpShutdown()
+	}
+
 	// Initialize dependencies using Google Wire
 	app, cleanup, err := InitializeApp(cfg)
 	if err != nil {
@@ -43,6 +54,9 @@ func main() {
 	defer cleanup()
 
 	// Configure routing
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		app.Engine.Use(otelgin.Middleware("feed-service"))
+	}
 	delivery.SetupRouter(app.Engine, app.FeedHandler, app.TokenManager)
 
 	port := app.Config.Port

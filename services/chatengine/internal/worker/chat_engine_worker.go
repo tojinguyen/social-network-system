@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"time"
 
@@ -14,8 +15,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	pkgkafka "social-network-system/pkg/kafka"
+	"social-network-system/pkg/tracing"
 	"social-network-system/services/chatengine/config"
 )
 
@@ -120,12 +125,35 @@ func (w *ChatEngineWorker) Start(ctx context.Context) {
 }
 
 func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message) {
+	traceCtx := ctx
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		traceCtx = tracing.ExtractKafkaHeaders(ctx, msg.Headers)
+		tracer := otel.Tracer("chatengine-worker")
+		var span trace.Span
+		traceCtx, span = tracer.Start(traceCtx, "process_chat_incoming_event", trace.WithSpanKind(trace.SpanKindConsumer))
+		defer span.End()
+		span.SetAttributes(
+			attribute.String("messaging.system", "kafka"),
+			attribute.String("messaging.destination", w.cfg.KafkaTopicChatIncoming),
+			attribute.String("messaging.operation", "process"),
+		)
+	}
+
 	var event ChatIncomingEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
 		log.Printf("Error unmarshalling event: %v", err)
 		// Commit bad format messages to avoid blocking
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
+	}
+
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		span := trace.SpanFromContext(traceCtx)
+		span.SetAttributes(
+			attribute.String("message.id", event.ID),
+			attribute.String("sender.id", event.SenderID),
+			attribute.String("recipient.id", event.RecipientID),
+		)
 	}
 
 	log.Printf("Processing chat incoming event: MsgID=%s, Sender=%s, Recipient=%s", event.ID, event.SenderID, event.RecipientID)
@@ -133,21 +161,21 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 	msgObjID, err := primitive.ObjectIDFromHex(event.ID)
 	if err != nil {
 		log.Printf("Invalid message ID: %v", err)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	senderObjID, err := primitive.ObjectIDFromHex(event.SenderID)
 	if err != nil {
 		log.Printf("Invalid sender ID: %v", err)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	recipientObjID, err := primitive.ObjectIDFromHex(event.RecipientID)
 	if err != nil {
 		log.Printf("Invalid recipient ID: %v", err)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
@@ -167,7 +195,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 		CreatedAt:      event.CreatedAt,
 	}
 
-	_, err = messagesColl.InsertOne(ctx, dbMessage)
+	_, err = messagesColl.InsertOne(traceCtx, dbMessage)
 	if err != nil {
 		// Log but do not skip/commit offset in case of temporary DB failure to allow retry
 		log.Printf("Failed to save message to MongoDB: %v", err)
@@ -176,7 +204,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 
 	// 2. Tra cứu trạng thái online của recipient trong Redis
 	presenceKey := fmt.Sprintf("presence:user:%s", event.RecipientID)
-	nodeID, err := w.redisClient.Get(ctx, presenceKey).Result()
+	nodeID, err := w.redisClient.Get(traceCtx, presenceKey).Result()
 	if err == nil && nodeID != "" {
 		// User online -> Routing qua Redis Pub/Sub
 		routeChannel := fmt.Sprintf("chat_node:%s", nodeID)
@@ -193,7 +221,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 
 		payloadBytes, err := json.Marshal(pubPayload)
 		if err == nil {
-			err = w.redisClient.Publish(ctx, routeChannel, payloadBytes).Err()
+			err = w.redisClient.Publish(traceCtx, routeChannel, payloadBytes).Err()
 			if err != nil {
 				log.Printf("Failed to publish message routing to Redis: %v", err)
 			} else {
@@ -206,7 +234,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 	}
 
 	// 3. Commit offset lên Kafka
-	if err := w.consumer.CommitMessages(ctx, msg); err != nil {
+	if err := w.consumer.CommitMessages(traceCtx, msg); err != nil {
 		log.Printf("Error committing Kafka offset: %v", err)
 	}
 }

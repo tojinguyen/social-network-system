@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/panjf2000/ants/v2"
@@ -13,8 +14,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	pkgkafka "social-network-system/pkg/kafka"
+	"social-network-system/pkg/tracing"
 	"social-network-system/services/fanout/config"
 )
 
@@ -97,6 +102,20 @@ func (w *FanoutWorker) Start(ctx context.Context) {
 }
 
 func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
+	traceCtx := ctx
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		traceCtx = tracing.ExtractKafkaHeaders(ctx, msg.Headers)
+		tracer := otel.Tracer("fanout-worker")
+		var span trace.Span
+		traceCtx, span = tracer.Start(traceCtx, "process_post_created_event", trace.WithSpanKind(trace.SpanKindConsumer))
+		defer span.End()
+		span.SetAttributes(
+			attribute.String("messaging.system", "kafka"),
+			attribute.String("messaging.destination", w.cfg.PostCreatedTopic),
+			attribute.String("messaging.operation", "process"),
+		)
+	}
+
 	db := w.mongoClient.Database(w.cfg.MongoDBName)
 	followColl := db.Collection("user_follows")
 
@@ -104,8 +123,16 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
 		log.Printf("Error unmarshalling event: %v", err)
 		// Commit corrupt message to avoid infinite retry loops
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
+	}
+
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		span := trace.SpanFromContext(traceCtx)
+		span.SetAttributes(
+			attribute.String("post.id", event.PostID),
+			attribute.String("author.id", event.AuthorID),
+		)
 	}
 
 	log.Printf("Processing post created event: Post=%s, Author=%s", event.PostID, event.AuthorID)
@@ -113,12 +140,12 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 	authorObjID, err := primitive.ObjectIDFromHex(event.AuthorID)
 	if err != nil {
 		log.Printf("Invalid author ID: %v", err)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	// 1. Evaluate celebrity threshold status
-	followerCount, err := followColl.CountDocuments(ctx, bson.M{"target_id": authorObjID})
+	followerCount, err := followColl.CountDocuments(traceCtx, bson.M{"target_id": authorObjID})
 	if err != nil {
 		log.Printf("Error counting followers: %v", err)
 		return // retry later by not committing
@@ -126,28 +153,28 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 
 	if int(followerCount) >= w.cfg.CelebrityThreshold {
 		log.Printf("Author %s is a Celebrity (%d followers). Skipping fan-out (Pull model will apply).", event.AuthorID, followerCount)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	// 2. Query followers
-	cursor, err := followColl.Find(ctx, bson.M{"target_id": authorObjID})
+	cursor, err := followColl.Find(traceCtx, bson.M{"target_id": authorObjID})
 	if err != nil {
 		log.Printf("Error finding followers: %v", err)
 		return // retry
 	}
 
 	var follows []UserFollow
-	if err := cursor.All(ctx, &follows); err != nil {
+	if err := cursor.All(traceCtx, &follows); err != nil {
 		log.Printf("Error decoding followers: %v", err)
-		cursor.Close(ctx)
+		cursor.Close(traceCtx)
 		return
 	}
-	cursor.Close(ctx)
+	cursor.Close(traceCtx)
 
 	if len(follows) == 0 {
 		log.Printf("Author %s has 0 followers. Skipping fan-out.", event.AuthorID)
-		_ = w.consumer.CommitMessages(ctx, msg)
+		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
@@ -159,19 +186,19 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 		followerKey := fmt.Sprintf("feed:user:%s", follow.FollowerID.Hex())
 
 		// Push new post to feed cache
-		pipe.ZAdd(ctx, followerKey, redis.Z{
+		pipe.ZAdd(traceCtx, followerKey, redis.Z{
 			Score:  score,
 			Member: event.PostID,
 		})
 
 		// Limit max cache to 500 items to conserve memory
-		pipe.ZRemRangeByRank(ctx, followerKey, 0, -501)
+		pipe.ZRemRangeByRank(traceCtx, followerKey, 0, -501)
 
 		// Set cache expiration (7 days)
-		pipe.Expire(ctx, followerKey, 7*24*time.Hour)
+		pipe.Expire(traceCtx, followerKey, 7*24*time.Hour)
 	}
 
-	_, err = pipe.Exec(ctx)
+	_, err = pipe.Exec(traceCtx)
 	if err != nil {
 		log.Printf("Error executing Redis pipeline: %v", err)
 		return // retry
@@ -180,7 +207,7 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 	log.Printf("Successfully fanned out post %s to %d followers", event.PostID, len(follows))
 
 	// 4. Commit message offset
-	if err := w.consumer.CommitMessages(ctx, msg); err != nil {
+	if err := w.consumer.CommitMessages(traceCtx, msg); err != nil {
 		log.Printf("Error committing offset: %v", err)
 	}
 }
