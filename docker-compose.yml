@@ -43,12 +43,12 @@ services:
       - JWT_SECRET=super_secret_access_token_key_123456
       - JWT_REFRESH_SECRET=super_secret_refresh_token_key_654321
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -70,13 +70,13 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC_POST_CREATED=post-created
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
       - kafka
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -97,12 +97,12 @@ services:
       - JWT_SECRET=super_secret_access_token_key_123456
       - CELEBRITY_THRESHOLD=10000
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -123,13 +123,13 @@ services:
       - KAFKA_TOPIC_POST_CREATED=post-created
       - CELEBRITY_THRESHOLD=10000
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
       - kafka
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -151,13 +151,13 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC_CHAT_INCOMING=chat-incoming
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
       - kafka
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -179,13 +179,13 @@ services:
       - CONSUMER_GROUP_ID=chat-engine-group
       - WORKER_POOL_SIZE=50
       - OTEL_ENABLED=true
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_METRICS_ENABLED=true
     depends_on:
       - mongodb
       - redis
       - kafka
-      - jaeger
+      - tempo
     networks:
       - social-network-net
 
@@ -208,12 +208,14 @@ services:
     networks:
       - social-network-net
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: social-network-jaeger
-    restart: always
+  tempo:
+    image: grafana/tempo:latest
+    container_name: social-network-tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
     ports:
-      - "16686:16686"
+      - "3200:3200"
       - "4317:4317"
       - "4318:4318"
     networks:
@@ -240,6 +242,7 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+      - tempo
     networks:
       - social-network-net
 
