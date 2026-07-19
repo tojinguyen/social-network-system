@@ -9,9 +9,37 @@ datasources:
     editable: true
 
   - name: Tempo
+    uid: tempo-datasource
     type: tempo
     access: proxy
     url: http://tempo:3200
     isDefault: false
     editable: true
+    jsonData:
+      traceToLogs:
+        datasourceUid: loki-datasource
+        tags:
+          - key: service.name
+            value: service
+        mappedTags:
+          - key: service.name
+            value: service
+        mapTagNamesEnabled: true
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        filterByTraceID: true
+        filterBySpanID: false
 
+  - name: Loki
+    uid: loki-datasource
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: true
+    jsonData:
+      derivedFields:
+        - datasourceUid: tempo-datasource
+          matcherRegex: '"trace_id":"(\w+)"'
+          name: TraceID
+          url: '$${__value.raw}'

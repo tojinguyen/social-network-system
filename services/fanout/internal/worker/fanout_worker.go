@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -65,22 +65,23 @@ func (w *FanoutWorker) Start(ctx context.Context) {
 	pool, err := ants.NewPoolWithFunc(w.cfg.WorkerPoolSize, func(i interface{}) {
 		msg, ok := i.(kafka.Message)
 		if !ok {
-			log.Println("Ants pool received invalid type payload")
+			slog.Error("Ants pool received invalid type payload")
 			return
 		}
 		w.processMessage(ctx, msg)
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize ants pool: %v", err)
+		slog.Error("Failed to initialize ants pool", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer pool.Release()
 
-	log.Printf("Fan-out Worker started with ants pool size %d, listening to topic: %s", w.cfg.WorkerPoolSize, w.cfg.PostCreatedTopic)
+	slog.Info("Fan-out Worker started", slog.Int("pool_size", w.cfg.WorkerPoolSize), slog.String("topic", w.cfg.PostCreatedTopic))
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping Fan-out consumer loop...")
+			slog.Info("Stopping Fan-out consumer loop...")
 			return
 		default:
 			msg, err := w.consumer.FetchMessage(ctx)
@@ -88,14 +89,14 @@ func (w *FanoutWorker) Start(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				log.Printf("Error fetching message: %v", err)
+				slog.Error("Error fetching message", slog.Any("error", err))
 				time.Sleep(1 * time.Second) // backoff on connection issue
 				continue
 			}
 
 			// Invoke task in pool. This is blocking if no goroutines are available
 			if err := pool.Invoke(msg); err != nil {
-				log.Printf("Failed to invoke task in ants pool: %v", err)
+				slog.Error("Failed to invoke task in ants pool", slog.Any("error", err))
 			}
 		}
 	}
@@ -121,7 +122,7 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 
 	var event PostCreatedEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
-		log.Printf("Error unmarshalling event: %v", err)
+		slog.ErrorContext(traceCtx, "Error unmarshalling event", slog.Any("error", err))
 		// Commit corrupt message to avoid infinite retry loops
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
@@ -135,11 +136,11 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 		)
 	}
 
-	log.Printf("Processing post created event: Post=%s, Author=%s", event.PostID, event.AuthorID)
+	slog.InfoContext(traceCtx, "Processing post created event", slog.String("post_id", event.PostID), slog.String("author_id", event.AuthorID))
 
 	authorObjID, err := primitive.ObjectIDFromHex(event.AuthorID)
 	if err != nil {
-		log.Printf("Invalid author ID: %v", err)
+		slog.ErrorContext(traceCtx, "Invalid author ID", slog.Any("error", err))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
@@ -147,12 +148,14 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 	// 1. Evaluate celebrity threshold status
 	followerCount, err := followColl.CountDocuments(traceCtx, bson.M{"target_id": authorObjID})
 	if err != nil {
-		log.Printf("Error counting followers: %v", err)
+		slog.ErrorContext(traceCtx, "Error counting followers", slog.Any("error", err))
 		return // retry later by not committing
 	}
 
 	if int(followerCount) >= w.cfg.CelebrityThreshold {
-		log.Printf("Author %s is a Celebrity (%d followers). Skipping fan-out (Pull model will apply).", event.AuthorID, followerCount)
+		slog.InfoContext(traceCtx, "Author is a Celebrity, skipping fan-out (Pull model will apply)",
+			slog.String("author_id", event.AuthorID),
+			slog.Int64("followers", followerCount))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
@@ -160,20 +163,20 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 	// 2. Query followers
 	cursor, err := followColl.Find(traceCtx, bson.M{"target_id": authorObjID})
 	if err != nil {
-		log.Printf("Error finding followers: %v", err)
+		slog.ErrorContext(traceCtx, "Error finding followers", slog.Any("error", err))
 		return // retry
 	}
 
 	var follows []UserFollow
 	if err := cursor.All(traceCtx, &follows); err != nil {
-		log.Printf("Error decoding followers: %v", err)
+		slog.ErrorContext(traceCtx, "Error decoding followers", slog.Any("error", err))
 		cursor.Close(traceCtx)
 		return
 	}
 	cursor.Close(traceCtx)
 
 	if len(follows) == 0 {
-		log.Printf("Author %s has 0 followers. Skipping fan-out.", event.AuthorID)
+		slog.InfoContext(traceCtx, "Author has 0 followers, skipping fan-out", slog.String("author_id", event.AuthorID))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
@@ -200,14 +203,16 @@ func (w *FanoutWorker) processMessage(ctx context.Context, msg kafka.Message) {
 
 	_, err = pipe.Exec(traceCtx)
 	if err != nil {
-		log.Printf("Error executing Redis pipeline: %v", err)
+		slog.ErrorContext(traceCtx, "Error executing Redis pipeline", slog.Any("error", err))
 		return // retry
 	}
 
-	log.Printf("Successfully fanned out post %s to %d followers", event.PostID, len(follows))
+	slog.InfoContext(traceCtx, "Successfully fanned out post",
+		slog.String("post_id", event.PostID),
+		slog.Int("followers", len(follows)))
 
 	// 4. Commit message offset
 	if err := w.consumer.CommitMessages(traceCtx, msg); err != nil {
-		log.Printf("Error committing offset: %v", err)
+		slog.ErrorContext(traceCtx, "Error committing offset", slog.Any("error", err))
 	}
 }

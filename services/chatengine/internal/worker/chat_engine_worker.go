@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"sort"
 	"time"
@@ -86,25 +86,26 @@ func (w *ChatEngineWorker) Start(ctx context.Context) {
 	pool, err := ants.NewPoolWithFunc(w.cfg.WorkerPoolSize, func(i interface{}) {
 		msg, ok := i.(kafka.Message)
 		if !ok {
-			log.Println("Ants pool received invalid type payload")
+			slog.Error("Ants pool received invalid type payload")
 			return
 		}
 		w.processMessage(ctx, msg)
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize ants pool: %v", err)
+		slog.Error("Failed to initialize ants pool", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer pool.Release()
 
 	// Ensure MongoDB messages collection index is created
 	w.ensureIndexes()
 
-	log.Printf("Chat Engine Worker started with ants pool size %d, listening to topic: %s", w.cfg.WorkerPoolSize, w.cfg.KafkaTopicChatIncoming)
+	slog.Info("Chat Engine Worker started", slog.Int("pool_size", w.cfg.WorkerPoolSize), slog.String("topic", w.cfg.KafkaTopicChatIncoming))
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping Chat Engine consumer loop...")
+			slog.Info("Stopping Chat Engine consumer loop...")
 			return
 		default:
 			msg, err := w.consumer.FetchMessage(ctx)
@@ -112,13 +113,13 @@ func (w *ChatEngineWorker) Start(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				log.Printf("Error fetching message from Kafka: %v", err)
+				slog.Error("Error fetching message from Kafka", slog.Any("error", err))
 				time.Sleep(1 * time.Second) // Backoff
 				continue
 			}
 
 			if err := pool.Invoke(msg); err != nil {
-				log.Printf("Failed to invoke task in ants pool: %v", err)
+				slog.Error("Failed to invoke task in ants pool", slog.Any("error", err))
 			}
 		}
 	}
@@ -141,7 +142,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 
 	var event ChatIncomingEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
-		log.Printf("Error unmarshalling event: %v", err)
+		slog.ErrorContext(traceCtx, "Error unmarshalling event", slog.Any("error", err))
 		// Commit bad format messages to avoid blocking
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
@@ -156,25 +157,28 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 		)
 	}
 
-	log.Printf("Processing chat incoming event: MsgID=%s, Sender=%s, Recipient=%s", event.ID, event.SenderID, event.RecipientID)
+	slog.InfoContext(traceCtx, "Processing chat incoming event",
+		slog.String("msg_id", event.ID),
+		slog.String("sender", event.SenderID),
+		slog.String("recipient", event.RecipientID))
 
 	msgObjID, err := primitive.ObjectIDFromHex(event.ID)
 	if err != nil {
-		log.Printf("Invalid message ID: %v", err)
+		slog.ErrorContext(traceCtx, "Invalid message ID", slog.Any("error", err))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	senderObjID, err := primitive.ObjectIDFromHex(event.SenderID)
 	if err != nil {
-		log.Printf("Invalid sender ID: %v", err)
+		slog.ErrorContext(traceCtx, "Invalid sender ID", slog.Any("error", err))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
 
 	recipientObjID, err := primitive.ObjectIDFromHex(event.RecipientID)
 	if err != nil {
-		log.Printf("Invalid recipient ID: %v", err)
+		slog.ErrorContext(traceCtx, "Invalid recipient ID", slog.Any("error", err))
 		_ = w.consumer.CommitMessages(traceCtx, msg)
 		return
 	}
@@ -198,7 +202,7 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 	_, err = messagesColl.InsertOne(traceCtx, dbMessage)
 	if err != nil {
 		// Log but do not skip/commit offset in case of temporary DB failure to allow retry
-		log.Printf("Failed to save message to MongoDB: %v", err)
+		slog.ErrorContext(traceCtx, "Failed to save message to MongoDB", slog.Any("error", err))
 		return
 	}
 
@@ -223,19 +227,23 @@ func (w *ChatEngineWorker) processMessage(ctx context.Context, msg kafka.Message
 		if err == nil {
 			err = w.redisClient.Publish(traceCtx, routeChannel, payloadBytes).Err()
 			if err != nil {
-				log.Printf("Failed to publish message routing to Redis: %v", err)
+				slog.ErrorContext(traceCtx, "Failed to publish message routing to Redis", slog.Any("error", err))
 			} else {
-				log.Printf("Message routed online to node %s for user %s", nodeID, event.RecipientID)
+				slog.InfoContext(traceCtx, "Message routed online",
+					slog.String("node_id", nodeID),
+					slog.String("recipient", event.RecipientID))
 			}
 		}
 	} else {
 		// User offline -> Giả lập offline notification
-		log.Printf("User %s is offline. Triggering Offline Push Notification: [New message from %s: %s]", event.RecipientID, event.SenderID, event.Content)
+		slog.InfoContext(traceCtx, "User is offline. Triggering Offline Push Notification",
+			slog.String("recipient", event.RecipientID),
+			slog.String("sender", event.SenderID))
 	}
 
 	// 3. Commit offset lên Kafka
 	if err := w.consumer.CommitMessages(traceCtx, msg); err != nil {
-		log.Printf("Error committing Kafka offset: %v", err)
+		slog.ErrorContext(traceCtx, "Error committing Kafka offset", slog.Any("error", err))
 	}
 }
 

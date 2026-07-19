@@ -15,7 +15,9 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"social-network-system/pkg/jwtutil"
+	"social-network-system/pkg/logger"
 	"social-network-system/pkg/metrics"
+	"social-network-system/pkg/middleware"
 	"social-network-system/pkg/tracing"
 	"social-network-system/services/feed/config"
 	delivery "social-network-system/services/feed/internal/delivery/http"
@@ -32,6 +34,9 @@ type App struct {
 }
 
 func main() {
+	// Initialize logger
+	logger.Init("feed-service")
+
 	// Load config using Viper from root or current directory
 	cfg, err := config.Load(".")
 	if err != nil {
@@ -69,6 +74,8 @@ func main() {
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		app.Engine.Use(otelgin.Middleware("feed-service"))
 	}
+	app.Engine.Use(middleware.LoggerMiddleware())
+
 	if os.Getenv("OTEL_METRICS_ENABLED") == "true" && metricsExporter != nil {
 		app.Engine.GET("/metrics", gin.WrapH(metricsExporter))
 	}

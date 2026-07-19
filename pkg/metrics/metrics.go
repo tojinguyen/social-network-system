@@ -23,6 +23,10 @@ func InitMetrics(ctx context.Context, serviceName string) (http.Handler, func(),
 
 	registry := prometheus.NewRegistry()
 
+	// Register Go runtime and process metrics
+	registry.MustRegister(prometheus.NewGoCollector())
+	registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+
 	// Register OpenTelemetry exporter to the custom registry automatically
 	exporter, err := otelprometheus.New(otelprometheus.WithRegisterer(registry))
 	if err != nil {

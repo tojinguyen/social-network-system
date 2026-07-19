@@ -9,11 +9,16 @@ import (
 	"syscall"
 	"time"
 
+	"social-network-system/pkg/logger"
 	"social-network-system/pkg/metrics"
+	"social-network-system/pkg/tracing"
 	"social-network-system/services/chatengine/config"
 )
 
 func main() {
+	// Initialize logger
+	logger.Init("chatengine-worker")
+
 	// Load config
 	cfg, err := config.Load(".")
 	if err != nil {
@@ -30,6 +35,15 @@ func main() {
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize tracing
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		tpShutdown, err := tracing.InitTracer(ctx, "chatengine-worker")
+		if err != nil {
+			log.Fatalf("Failed to initialize tracer: %v", err)
+		}
+		defer tpShutdown()
+	}
 
 	// Initialize metrics
 	if os.Getenv("OTEL_METRICS_ENABLED") == "true" {

@@ -11,12 +11,17 @@ import (
 
 	"social-network-system/pkg/database"
 	"social-network-system/pkg/kafka"
+	"social-network-system/pkg/logger"
 	"social-network-system/pkg/metrics"
+	"social-network-system/pkg/tracing"
 	"social-network-system/services/fanout/config"
 	"social-network-system/services/fanout/internal/worker"
 )
 
 func main() {
+	// Initialize logger
+	logger.Init("fanout-worker")
+
 	// Load config
 	cfg, err := config.Load(".")
 	if err != nil {
@@ -25,6 +30,15 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize tracing
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		tpShutdown, err := tracing.InitTracer(ctx, "fanout-worker")
+		if err != nil {
+			log.Fatalf("Failed to initialize tracer: %v", err)
+		}
+		defer tpShutdown()
+	}
 
 	// Connect MongoDB
 	mongoClient, _, err := database.ConnectMongoDB(ctx, cfg.MongoURI, cfg.MongoDBName)
