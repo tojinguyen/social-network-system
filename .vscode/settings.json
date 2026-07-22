@@ -1,5 +1,5 @@
 {
   "gopls": {
-    "build.buildFlags": []
+    "build.buildFlags": ["-tags=integration"]
   }
 }
